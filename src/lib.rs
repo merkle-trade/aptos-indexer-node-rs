@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use aptos_protos::indexer::v1::{
   raw_data_client::RawDataClient, GetTransactionsRequest, TransactionsResponse,
 };
@@ -162,4 +164,9 @@ async fn filter_txs(
 
     tx.send(r).await.unwrap();
   }
+}
+
+#[napi]
+pub fn sum(a: i32, b: i32) -> i32 {
+  a + b
 }

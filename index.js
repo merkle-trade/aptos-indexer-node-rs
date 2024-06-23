@@ -310,7 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { startFetchTransactions, nextTransactions } = nativeBinding
+const { startFetchTransactions, nextTransactions, sum } = nativeBinding
 
 module.exports.startFetchTransactions = startFetchTransactions
 module.exports.nextTransactions = nextTransactions
+module.exports.sum = sum
