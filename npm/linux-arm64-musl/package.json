@@ -1,0 +1,21 @@
+{
+  "name": "@merkletrade/aptos-indexer-node-rs-linux-arm64-musl",
+  "version": "0.0.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "aptos-indexer-node-rs.linux-arm64-musl.node",
+  "files": [
+    "aptos-indexer-node-rs.linux-arm64-musl.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  },
+  "libc": [
+    "musl"
+  ]
+}

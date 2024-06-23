@@ -24,6 +24,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@merkletrade/aptos-indexer-node-rs@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@merkletrade/aptos-indexer-node-rs@workspace:."
+  dependencies:
+    "@napi-rs/cli": "npm:^2.18.3"
+    ava: "npm:^6.0.1"
+  languageName: unknown
+  linkType: soft
+
 "@napi-rs/cli@npm:^2.18.3":
   version: 2.18.3
   resolution: "@napi-rs/cli@npm:2.18.3"
@@ -178,15 +187,6 @@ __metadata:
   checksum: 10c0/d06e26384a8f6245d8c8896e138c0388824e259a329e0c9f196b4fa533c82502a6fd449586e3604950a0c42921832a458bb3aa0aa9f0ba449cfd4f50fd0d09b5
   languageName: node
   linkType: hard
-
-"aptos-indexer-node-rs@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "aptos-indexer-node-rs@workspace:."
-  dependencies:
-    "@napi-rs/cli": "npm:^2.18.3"
-    ava: "npm:^6.0.1"
-  languageName: unknown
-  linkType: soft
 
 "are-we-there-yet@npm:^2.0.0":
   version: 2.0.0
