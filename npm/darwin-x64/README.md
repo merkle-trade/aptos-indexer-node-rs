@@ -1,3 +1,3 @@
-# `aptos-indexer-node-rs-darwin-x64`
+# `@merkletrade/aptos-indexer-node-rs-darwin-x64`
 
-This is the **x86_64-apple-darwin** binary for `aptos-indexer-node-rs`
+This is the **x86_64-apple-darwin** binary for `@merkletrade/aptos-indexer-node-rs`
