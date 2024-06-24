@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, Mutex};
 extern crate napi_derive;
 
 const MAX_RESPONSE_SIZE: usize = 1024 * 1024 * 256;
+const MPSC_BUFFER_SIZE: usize = 5;
 
 lazy_static! {
   static ref RUNTIME: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
@@ -46,8 +47,8 @@ pub async fn start_fetch_transactions(
   end_version: Option<BigInt>,
   filter: Option<TransactionFilter>,
 ) -> i32 {
-  let (fetch_tx, fetch_rx) = mpsc::channel(3);
-  let (filter_tx, filter_rx) = mpsc::channel(3);
+  let (fetch_tx, fetch_rx) = mpsc::channel(MPSC_BUFFER_SIZE);
+  let (filter_tx, filter_rx) = mpsc::channel(MPSC_BUFFER_SIZE);
   let ch = CHANNEL_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
   let mut rxs = RXS.lock().await;
   rxs.insert(ch, filter_rx);
@@ -74,13 +75,13 @@ pub async fn start_fetch_transactions(
 }
 
 #[napi]
-pub async fn next_transactions(ch: i32) -> Option<String> {
+pub async fn next_transactions(ch: i32) -> String {
   let mut rxs = RXS.lock().await;
   let rx = rxs.get_mut(&ch).unwrap();
 
   let res = rx.recv().await;
 
-  Some(serde_json::to_string(&res).unwrap())
+  serde_json::to_string(&res).unwrap()
 }
 
 async fn fetch_txs(
@@ -148,17 +149,27 @@ async fn filter_txs(
     r.transactions = r
       .transactions
       .into_iter()
-      .filter(|t| {
-        if let Some(TxnData::User(user_transaction)) = t.txn_data.as_ref() {
-          let is_focus = user_transaction
+      .filter_map(|mut txn| {
+        if let Some(TxnData::User(user_txn)) = txn.txn_data.as_mut() {
+          let should_strip = user_txn
             .events
             .iter()
-            .any(|e| is_focus_type_str(e.type_str.as_str()));
-          if is_focus {
-            return true;
+            .all(|e| !is_focus_type_str(e.type_str.as_str()));
+          if !should_strip {
+            return Some(txn);
+          }
+
+          // strip transaction
+          if let Some(info) = txn.info.as_mut() {
+            info.changes = vec![];
+          }
+          user_txn.events = vec![];
+          if let Some(request) = user_txn.request.as_mut() {
+            request.payload = None;
+            request.signature = None;
           }
         }
-        false
+        None
       })
       .collect();
 
