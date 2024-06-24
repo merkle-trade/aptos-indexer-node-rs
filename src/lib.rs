@@ -4,6 +4,7 @@ use aptos_protos::indexer::v1::{
   raw_data_client::RawDataClient, GetTransactionsRequest, TransactionsResponse,
 };
 use aptos_protos::transaction::v1::transaction::TxnData;
+use aptos_protos::transaction::v1::write_set_change::Change;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use napi::bindgen_prelude::BigInt;
@@ -36,7 +37,7 @@ lazy_static! {
 #[napi(object)]
 pub struct TransactionFilter {
   // only transactions with events from these addresses will be returned
-  pub focus_event_addresses: Vec<String>,
+  pub focus_contract_addresses: Vec<String>,
 }
 
 #[napi]
@@ -52,11 +53,6 @@ pub async fn start_fetch_transactions(
   let ch = CHANNEL_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
   let mut rxs = RXS.lock().await;
   rxs.insert(ch, filter_rx);
-
-  println!(
-    "starting fetch txs (start_version: {:?}, end_version: {:?}) ch: {}",
-    start_version, end_version, ch
-  );
 
   RUNTIME.spawn(async move {
     fetch_txs(
@@ -136,12 +132,14 @@ async fn filter_txs(
   tx: mpsc::Sender<TransactionsResponse>,
   filter: Option<TransactionFilter>,
 ) {
-  let focus_contract_addresses = filter.map(|f| f.focus_event_addresses).unwrap_or_default();
+  let focus_contract_addresses = filter
+    .map(|f| f.focus_contract_addresses)
+    .unwrap_or_default();
 
-  let is_focus_type_str = move |type_str: &str| {
+  let is_focus_type = |t: &str| {
     focus_contract_addresses
       .iter()
-      .any(|a| type_str.starts_with(a))
+      .any(|a| t.starts_with(&format!("{}::", a)))
   };
 
   loop {
@@ -151,11 +149,29 @@ async fn filter_txs(
       .into_iter()
       .filter_map(|mut txn| {
         if let Some(TxnData::User(user_txn)) = txn.txn_data.as_mut() {
-          let should_strip = user_txn
-            .events
-            .iter()
-            .all(|e| !is_focus_type_str(e.type_str.as_str()));
-          if !should_strip {
+          let is_focus = user_txn.events.iter().any(|e| is_focus_type(&e.type_str));
+          if is_focus {
+            return Some(txn);
+          }
+
+          let is_focus = if let Some(info) = txn.info.as_ref() {
+            info.changes.iter().any(|c| match c.change.as_ref() {
+              Some(Change::DeleteResource(dr)) => is_focus_type(dr.type_str.as_str()),
+              Some(Change::DeleteTableItem(_)) => true,
+              Some(Change::WriteResource(wr)) => is_focus_type(wr.type_str.as_str()),
+              Some(Change::WriteTableItem(wti)) => is_focus_type(
+                wti
+                  .data
+                  .as_ref()
+                  .map(|d| d.value_type.as_str())
+                  .unwrap_or_default(),
+              ),
+              _ => false,
+            })
+          } else {
+            false
+          };
+          if is_focus {
             return Some(txn);
           }
 
