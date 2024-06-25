@@ -10,13 +10,14 @@ use lazy_static::lazy_static;
 use napi::bindgen_prelude::BigInt;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicI32, Arc};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex};
 
 #[macro_use]
 extern crate napi_derive;
 
 const MAX_RESPONSE_SIZE: usize = 1024 * 1024 * 256;
-const MPSC_BUFFER_SIZE: usize = 5;
+const MPSC_BUFFER_SIZE: usize = 10;
 
 lazy_static! {
   static ref RUNTIME: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
@@ -71,22 +72,19 @@ pub async fn start_fetch_transactions(
 }
 
 #[napi]
-pub async fn next_transactions(ch: i32) -> String {
+pub async fn next_transactions(ch: i32) -> Option<String> {
   let mut rxs = RXS.lock().await;
-  let rx = rxs.get_mut(&ch).unwrap();
-
-  let res = rx.recv().await;
-
-  serde_json::to_string(&res).unwrap()
+  let rx = rxs.get_mut(&ch)?;
+  let res = rx.recv().await?;
+  serde_json::to_string(&res).ok()
 }
 
-async fn fetch_txs(
-  tx: mpsc::Sender<TransactionsResponse>,
+async fn get_fetch_txs_stream(
   url: String,
   auth_key: Option<String>,
   start_version: u64,
   end_version: Option<u64>,
-) {
+) -> tonic::Streaming<TransactionsResponse> {
   let mut client = RawDataClient::connect(url)
     .await
     .unwrap()
@@ -95,11 +93,6 @@ async fn fetch_txs(
     .send_compressed(tonic::codec::CompressionEncoding::Zstd)
     .max_decoding_message_size(MAX_RESPONSE_SIZE)
     .max_encoding_message_size(MAX_RESPONSE_SIZE);
-
-  println!(
-    "start_version: {}, end_version: {:?}",
-    start_version, end_version
-  );
 
   let count = end_version.map(|v| v - start_version + 1);
   let mut request = tonic::Request::new(GetTransactionsRequest {
@@ -115,15 +108,71 @@ async fn fetch_txs(
     );
   }
 
-  let mut response = client.get_transactions(request).await.unwrap().into_inner();
+  let response = client.get_transactions(request).await.unwrap().into_inner();
+  response
+}
+
+async fn fetch_txs(
+  tx: mpsc::Sender<TransactionsResponse>,
+  url: String,
+  auth_key: Option<String>,
+  start_version: u64,
+  end_version: Option<u64>,
+) {
+  println!(
+    "start_version: {}, end_version: {:?}",
+    start_version, end_version
+  );
+
+  let mut last_version = start_version;
+  let mut last_err_timestamps = vec![];
 
   loop {
-    let r = response.next().await.unwrap().unwrap();
-    if r.transactions.len() == 0 {
-      continue;
+    let mut stream =
+      get_fetch_txs_stream(url.clone(), auth_key.clone(), last_version, end_version).await;
+
+    let is_success = loop {
+      let ts = Instant::now();
+      match stream.next().await {
+        Some(Ok(r)) => {
+          let Some(last_tx) = r.transactions.last() else {
+            continue;
+          };
+          println!("{}ms", ts.elapsed().as_millis());
+          let _last_version = last_tx.version;
+
+          if let Err(e) = tx.send(r).await {
+            println!("Error: {:?}", e);
+            break false;
+          }
+          last_version = _last_version;
+        }
+        Some(Err(e)) => {
+          println!("Error: {:?}", e);
+          break false;
+        }
+        None => {
+          println!("End of stream");
+          break true;
+        }
+      }
+    };
+
+    let is_all_fetched = last_version >= end_version.unwrap_or(u64::MAX);
+    if is_success && is_all_fetched {
+      break;
     }
 
-    tx.send(r).await.unwrap();
+    // erroneous case. panic if 3 times within 10 seconds
+    let now = Instant::now();
+    last_err_timestamps = last_err_timestamps
+      .into_iter()
+      .filter(|t| now.duration_since(*t) < Duration::from_secs(10))
+      .collect();
+    last_err_timestamps.push(now);
+    if last_err_timestamps.len() >= 3 {
+      panic!("Too many errors");
+    }
   }
 }
 
@@ -143,7 +192,10 @@ async fn filter_txs(
   };
 
   loop {
-    let mut r = rx.recv().await.unwrap();
+    let Some(mut r) = rx.recv().await else {
+      break;
+    };
+
     r.transactions = r
       .transactions
       .into_iter()
@@ -189,7 +241,9 @@ async fn filter_txs(
       })
       .collect();
 
-    tx.send(r).await.unwrap();
+    let Ok(_) = tx.send(r).await else {
+      break;
+    };
   }
 }
 
