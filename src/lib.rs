@@ -130,15 +130,14 @@ async fn fetch_txs(
   loop {
     let mut stream =
       get_fetch_txs_stream(url.clone(), auth_key.clone(), last_version, end_version).await;
+    let end_version = end_version.unwrap_or(std::u64::MAX);
 
     let is_success = loop {
-      let ts = Instant::now();
       match stream.next().await {
         Some(Ok(r)) => {
           let Some(last_tx) = r.transactions.last() else {
             continue;
           };
-          println!("{}ms", ts.elapsed().as_millis());
           let _last_version = last_tx.version;
 
           if let Err(e) = tx.send(r).await {
@@ -146,6 +145,9 @@ async fn fetch_txs(
             break false;
           }
           last_version = _last_version;
+          if last_version >= end_version {
+            break true;
+          }
         }
         Some(Err(e)) => {
           println!("Error: {:?}", e);
@@ -158,7 +160,7 @@ async fn fetch_txs(
       }
     };
 
-    let is_all_fetched = last_version >= end_version.unwrap_or(u64::MAX);
+    let is_all_fetched = last_version >= end_version;
     if is_success && is_all_fetched {
       break;
     }
