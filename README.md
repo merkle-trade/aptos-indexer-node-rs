@@ -7,7 +7,10 @@ It also provides basic transaction filtering and auto-reconnection on intermitte
 ### Basic Usage
 
 ```ts
-import { startFetchTransactions, nextTransactions } from "@merkletrade/aptos-indexer-node-rs";
+import {
+  startFetchTransactions,
+  nextTransactions,
+} from "@merkletrade/aptos-indexer-node-rs";
 
 const ch = await startFetchTransactions(
   "https://grpc.mainnet.aptoslabs.com",
@@ -18,7 +21,7 @@ const ch = await startFetchTransactions(
 );
 
 while (true) {
-  const resp = await nextTransactions(ch).then(v => v && JSON.parse(v));
+  const resp = await nextTransactions(ch).then((v) => v && JSON.parse(v));
   if (!resp) return;
 
   // process txs
@@ -29,7 +32,11 @@ while (true) {
 ### Usage with Node Stream
 
 ```ts
-import { startFetchTransactions, nextTransactions } from "@merkletrade/aptos-indexer-node-rs";
+import { Readable } from "node:stream";
+import {
+  startFetchTransactions,
+  nextTransactions,
+} from "@merkletrade/aptos-indexer-node-rs";
 
 const BUFFER_SIZE = 10;
 
@@ -43,7 +50,7 @@ const fetchTxs = async function* () {
   );
 
   while (true) {
-    const resp = await nextTransaction(ch).then(v => v && JSON.parse(v));
+    const resp = await nextTransactions(ch).then((v) => v && JSON.parse(v));
     if (!resp) return;
     yield resp;
   }

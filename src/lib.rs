@@ -76,7 +76,7 @@ pub async fn next_transactions(ch: i32) -> Option<String> {
   let mut rxs = RXS.lock().await;
   let rx = rxs.get_mut(&ch)?;
   let res = rx.recv().await?;
-  serde_json::to_string(&res).ok()
+  serde_json::to_string(&res).ok() // TODO: find better way to pass data to JS
 }
 
 async fn get_fetch_txs_stream(
