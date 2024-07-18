@@ -238,6 +238,7 @@ async fn filter_txs(
             request.payload = None;
             request.signature = None;
           }
+          return Some(txn);
         }
         None
       })
