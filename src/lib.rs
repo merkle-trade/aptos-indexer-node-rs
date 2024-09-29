@@ -8,6 +8,7 @@ use aptos_protos::transaction::v1::write_set_change::Change;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use napi::bindgen_prelude::BigInt;
+use regex::Regex;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicI32, Arc};
 use std::time::{Duration, Instant};
@@ -36,9 +37,10 @@ lazy_static! {
 }
 
 #[napi(object)]
-pub struct TransactionFilter {
-  // only transactions with events from these addresses will be returned
-  pub focus_contract_addresses: Vec<String>,
+#[derive(Default)]
+pub struct TransactionFilterOptions {
+  pub type_patterns: Option<Vec<String>>,
+  pub fetch_all_delete_table_item: Option<bool>,
 }
 
 #[napi]
@@ -47,7 +49,7 @@ pub async fn start_fetch_transactions(
   auth_key: Option<String>,
   start_version: BigInt,
   end_version: Option<BigInt>,
-  filter: Option<TransactionFilter>,
+  filter_options: Option<TransactionFilterOptions>,
 ) -> i32 {
   let (fetch_tx, fetch_rx) = mpsc::channel(MPSC_BUFFER_SIZE);
   let (filter_tx, filter_rx) = mpsc::channel(MPSC_BUFFER_SIZE);
@@ -66,7 +68,7 @@ pub async fn start_fetch_transactions(
     .await
   });
 
-  RUNTIME.spawn(async move { filter_txs(fetch_rx, filter_tx, filter).await });
+  RUNTIME.spawn(async move { filter_txs(fetch_rx, filter_tx, filter_options).await });
 
   ch
 }
@@ -181,51 +183,49 @@ async fn fetch_txs(
 async fn filter_txs(
   mut rx: mpsc::Receiver<TransactionsResponse>,
   tx: mpsc::Sender<TransactionsResponse>,
-  filter: Option<TransactionFilter>,
+  filter_options: Option<TransactionFilterOptions>,
 ) {
-  let focus_contract_addresses = filter
-    .map(|f| f.focus_contract_addresses)
+  let TransactionFilterOptions {
+    type_patterns,
+    fetch_all_delete_table_item,
+  } = filter_options.unwrap_or_default();
+
+  let type_patterns = type_patterns
+    .map(|ps| {
+      ps.into_iter()
+        .map(|p| Regex::new(&p).unwrap())
+        .collect::<Vec<_>>()
+    })
     .unwrap_or_default();
+  let fetch_all_delete_table_item = fetch_all_delete_table_item.unwrap_or(false);
 
-  let is_focus_type = |t: &str| {
-    focus_contract_addresses
-      .iter()
-      .any(|a| t.starts_with(&format!("{}::", a)))
-  };
+  let is_fetch_type =
+    |t: &str| type_patterns.len() == 0 || type_patterns.iter().any(|p| p.is_match(t));
 
-  loop {
-    let Some(mut r) = rx.recv().await else {
-      break;
-    };
-
+  while let Some(mut r) = rx.recv().await {
     r.transactions = r
       .transactions
       .into_iter()
       .filter_map(|mut txn| {
         if let Some(TxnData::User(user_txn)) = txn.txn_data.as_mut() {
-          let is_focus = user_txn.events.iter().any(|e| is_focus_type(&e.type_str));
-          if is_focus {
+          let is_fetch = user_txn.events.iter().any(|e| is_fetch_type(&e.type_str));
+          if is_fetch {
             return Some(txn);
           }
 
-          let is_focus = if let Some(info) = txn.info.as_ref() {
+          let is_fetch = txn.info.as_ref().map_or(false, |info| {
             info.changes.iter().any(|c| match c.change.as_ref() {
-              Some(Change::DeleteResource(dr)) => is_focus_type(dr.type_str.as_str()),
-              Some(Change::DeleteTableItem(_)) => true,
-              Some(Change::WriteResource(wr)) => is_focus_type(wr.type_str.as_str()),
-              Some(Change::WriteTableItem(wti)) => is_focus_type(
-                wti
-                  .data
-                  .as_ref()
-                  .map(|d| d.value_type.as_str())
-                  .unwrap_or_default(),
-              ),
+              Some(Change::DeleteResource(dr)) => is_fetch_type(&dr.type_str),
+              Some(Change::DeleteTableItem(_)) => fetch_all_delete_table_item,
+              Some(Change::WriteResource(wr)) => is_fetch_type(&wr.type_str),
+              Some(Change::WriteTableItem(wti)) => wti
+                .data
+                .as_ref()
+                .map_or(false, |d| is_fetch_type(&d.value_type)),
               _ => false,
             })
-          } else {
-            false
-          };
-          if is_focus {
+          });
+          if is_fetch {
             return Some(txn);
           }
 
@@ -244,9 +244,9 @@ async fn filter_txs(
       })
       .collect();
 
-    let Ok(_) = tx.send(r).await else {
+    if tx.send(r).await.is_err() {
       break;
-    };
+    }
   }
 }
 
