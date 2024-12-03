@@ -8,7 +8,7 @@ use aptos_protos::transaction::v1::write_set_change::Change;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use napi::bindgen_prelude::BigInt;
-use regex::Regex;
+use pcre2::bytes::Regex;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicI32, Arc};
 use std::time::{Duration, Instant};
@@ -199,8 +199,12 @@ async fn filter_txs(
     .unwrap_or_default();
   let fetch_all_delete_table_item = fetch_all_delete_table_item.unwrap_or(false);
 
-  let is_fetch_type =
-    |t: &str| type_patterns.len() == 0 || type_patterns.iter().any(|p| p.is_match(t));
+  let is_fetch_type = |t: &str| {
+    type_patterns.len() == 0
+      || type_patterns
+        .iter()
+        .any(|p| p.is_match(t.as_bytes()).unwrap_or(false))
+  };
 
   while let Some(mut r) = rx.recv().await {
     r.transactions = r
