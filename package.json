@@ -1,6 +1,6 @@
 {
   "name": "@merkletrade/aptos-indexer-node-rs",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "repository": {
     "type": "git",
     "url": "https://github.com/merkle-trade/aptos-indexer-node-rs.git"
