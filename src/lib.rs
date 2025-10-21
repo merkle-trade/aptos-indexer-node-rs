@@ -101,6 +101,7 @@ async fn get_fetch_txs_stream(
     starting_version: Some(start_version),
     batch_size: None,
     transactions_count: count,
+    transaction_filter: None,
   });
 
   if let Some(auth_key) = auth_key {
